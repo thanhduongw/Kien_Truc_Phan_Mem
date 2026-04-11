@@ -1,0 +1,19 @@
+services:
+  service-a:
+    image: alpine
+    container_name: service-a
+    command: sh -c "while true; do sleep 30; done"
+    networks:
+      - private-net
+
+  service-b:
+    image: alpine
+    container_name: service-b
+    command: sh -c "while true; do sleep 30; done"
+    networks:
+      - private-net
+
+networks:
+  private-net:
+    driver: bridge
+    name: my-private-network

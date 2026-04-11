@@ -1,0 +1,38 @@
+services:
+  mariadb:
+    image: mariadb:10.11
+    container_name: nextcloud-db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: ncuser
+      MYSQL_PASSWORD: ncpassword
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+  redis:
+    image: redis:alpine
+    container_name: nextcloud-redis
+
+  nextcloud:
+    image: nextcloud:latest
+    container_name: nextcloud
+    ports:
+      - "80:80"
+    environment:
+      MYSQL_HOST: mariadb
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: ncuser
+      MYSQL_PASSWORD: ncpassword
+      REDIS_HOST: redis
+      NEXTCLOUD_ADMIN_USER: admin
+      NEXTCLOUD_ADMIN_PASSWORD: admin123
+    volumes:
+      - nextcloud_data:/var/www/html
+    depends_on:
+      - mariadb
+      - redis
+
+volumes:
+  mariadb_data:
+  nextcloud_data:
