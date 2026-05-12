@@ -1,0 +1,51 @@
+version: "3.8"
+
+services:
+  orchestrator-service:
+    build: ./backend/orchestrator-service
+    container_name: orchestrator-service
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - USER_SERVICE_URL=http://user-service:8081
+      - TOUR_SERVICE_URL=http://tour-service:8082
+      - BOOKING_SERVICE_URL=http://booking-service:8083
+      - PAYMENT_SERVICE_URL=http://payment-service:8084
+    depends_on:
+      - user-service
+      - tour-service
+      - booking-service
+      - payment-service
+
+  user-service:
+    build: ./backend/user-service
+    container_name: user-service
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+
+  tour-service:
+    build: ./backend/tour-service
+    container_name: tour-service
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+
+  booking-service:
+    build: ./backend/booking-service
+    container_name: booking-service
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+
+  payment-service:
+    build: ./backend/payment-service
+    container_name: payment-service
+    ports:
+      - "8084:8084"
+    environment:
+      - PORT=8084
