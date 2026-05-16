@@ -3,7 +3,8 @@ import cors from 'cors';
 import mariadb from 'mariadb';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT || 3001);
+const DB_NAME = 'user_service_db';
 
 app.use(cors());
 app.use(express.json());
@@ -12,25 +13,37 @@ const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || 'sapassword',
-  port: parseInt(process.env.DB_PORT || '3306')
+  port: Number(process.env.DB_PORT || '3306')
 };
 
 let pool;
 
-async function initDB(retries = 10, delay = 3000) {
-  for (let i = 1; i <= retries; i++) {
-    try {
-      const conn = await mariadb.createConnection({
-        host: dbConfig.host,
-        user: dbConfig.user,
-        password: dbConfig.password,
-        port: dbConfig.port
-      });
-      await conn.query(`CREATE DATABASE IF NOT EXISTS user_service_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-      await conn.query(`ALTER DATABASE user_service_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-      await conn.end();
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const fail = (res, error, status = 500, fallbackMessage) => {
+  const message = fallbackMessage || error.message;
+  return res.status(status).json({ message });
+};
 
-      pool = mariadb.createPool({ ...dbConfig, database: 'user_service_db', connectionLimit: 5 });
+async function ensureDatabase() {
+  const conn = await mariadb.createConnection(dbConfig);
+  await conn.query(`CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+  await conn.query(`ALTER DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+  await conn.end();
+}
+
+async function seedUsers() {
+  const rows = await pool.query('SELECT * FROM users WHERE username = "admin"');
+  if (rows.length === 0) {
+    await pool.query('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', ['admin', 'admin', 'ADMIN']);
+    await pool.query('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', ['user', 'user', 'USER']);
+  }
+}
+
+async function initDB(retries = 10, delay = 3000) {
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    try {
+      await ensureDatabase();
+      pool = mariadb.createPool({ ...dbConfig, database: DB_NAME, connectionLimit: 5 });
 
       await pool.query(`
         CREATE TABLE IF NOT EXISTS users (
@@ -41,24 +54,18 @@ async function initDB(retries = 10, delay = 3000) {
         ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
       `);
 
-      const rows = await pool.query('SELECT * FROM users WHERE username = "admin"');
-      if (rows.length === 0) {
-        await pool.query('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', ['admin', 'admin', 'ADMIN']);
-        await pool.query('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', ['user', 'user', 'USER']);
-      }
-
+      await seedUsers();
       console.log(`User Service Database initialized on ${dbConfig.host}`);
       return;
     } catch (error) {
-      console.error(`User DB Error (attempt ${i}/${retries}): ${error.message}`);
-      if (i < retries) await new Promise(r => setTimeout(r, delay));
+      console.error(`User DB Error (attempt ${attempt}/${retries}): ${error.message}`);
+      if (attempt < retries) await sleep(delay);
     }
   }
+
   console.error('User Service: Failed to connect to DB after all retries. Exiting.');
   process.exit(1);
 }
-
-initDB();
 
 app.post('/api/users/register', async (req, res) => {
   const { username, password } = req.body;
@@ -67,7 +74,7 @@ app.post('/api/users/register', async (req, res) => {
     const rows = await pool.query('SELECT id, username, role FROM users WHERE username = ?', [username]);
     res.status(201).json(rows[0]);
   } catch (error) {
-    res.status(400).json({ message: 'User already exists or registration failed' });
+    fail(res, error, 400, 'User already exists or registration failed');
   }
 });
 
@@ -75,13 +82,12 @@ app.post('/api/users/login', async (req, res) => {
   const { username, password } = req.body;
   try {
     const rows = await pool.query('SELECT id, username, role FROM users WHERE username = ? AND password = ?', [username, password]);
-    if (rows.length > 0) {
-      res.json(rows[0]);
-    } else {
-      res.status(401).json({ message: 'Invalid credentials' });
+    if (rows.length === 0) {
+      return res.status(401).json({ message: 'Invalid credentials' });
     }
+    return res.json(rows[0]);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    return fail(res, error);
   }
 });
 
@@ -90,10 +96,12 @@ app.get('/api/users', async (req, res) => {
     const rows = await pool.query('SELECT id, username, role FROM users');
     res.json(rows);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    fail(res, error);
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`User Service running on port ${PORT}`);
+initDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`User Service running on port ${PORT}`);
+  });
 });
